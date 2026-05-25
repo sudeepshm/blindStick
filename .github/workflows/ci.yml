@@ -1,0 +1,37 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:5.0
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'" --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install deps
+        working-directory: FINAL-CODE/AWS
+        run: npm ci
+      - name: Start server
+        working-directory: FINAL-CODE/AWS
+        env:
+          MONGO_URI: mongodb://localhost:27017/geofence-ci
+          API_KEY: test_ci_key
+        run: |
+          nohup node server.js &
+          sleep 3
+      - name: Run E2E Tests
+        working-directory: FINAL-CODE/AWS
+        env:
+          SERVER_URL: http://localhost:3000
+          DEVICE_ID: test-device-1
+          API_KEY: test_ci_key
+        run: npm run test:e2e

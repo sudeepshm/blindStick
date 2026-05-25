@@ -3,54 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Geofence Tracker</title>
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.css"
-  />
-  <link
-    rel="stylesheet"
-    href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
-  />
-  <link
-    rel="stylesheet"
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-  />
+  <title>Geofence Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    html,body,#map { height:100%; }
+    body { height:100vh; margin:0; }
+    .sidebar { height:100vh; padding-top:1rem; border-right:1px solid #eaeaea; }
+    #map { min-height: 60vh; }
+    .alerts { max-height: 40vh; overflow:auto; }
+    .device-list { max-height: 40vh; overflow:auto; }
+  </style>
+</head>
+<body>
+  <div class="d-flex">
+    <nav class="sidebar bg-light col-3">
+      <div class="px-3">
+        <h4>Geofence Dashboard</h4>
+        <ul class="nav flex-column mt-3">
+          <li class="nav-item"><a class="nav-link active" href="/">Live</a></li>
+          <li class="nav-item"><a class="nav-link" href="/">Devices</a></li>
+          <li class="nav-item"><a class="nav-link" href="/">History</a></li>
+          <li class="nav-item"><a class="nav-link" href="/">Geofences</a></li>
+          <li class="nav-item"><a class="nav-link" href="/">Alerts</a></li>
+          <li class="nav-item"><a class="nav-link" href="commands.html">Commands</a></li>
+        </ul>
+
+        <div class="mt-4">
+          <h6>Connected Devices</h6>
+          <div id="device-list" class="device-list list-group small">
+            <!-- Device items injected here -->
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="flex-grow-1 p-3">
+      <div class="row">
+        <div class="col-9">
+          <div id="map"></div>
+        </div>
+        <div class="col-3">
+          <div class="card mb-3">
+            <div class="card-body">
+              <h6 class="card-title">Device Details</h6>
+              <div id="device-details">
+                <p>Select a device to view details.</p>
+                <div id="device-basic" style="font-size:0.9rem; color:#333"></div>
+                <div class="mt-2">
+                  <canvas id="battery-chart" width="300" height="150"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <h6 class="card-title">Alerts</h6>
+              <div id="alerts" class="alerts"></div>
+            </div>
+          </div>
+
+          <div class="card mt-3">
+            <div class="card-body">
+              <h6 class="card-title">Commands</h6>
+              <div id="commands" class="small">
+                <ul id="commands-list" class="list-group small"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row mt-3">
+        <div class="col-12">
+          <h5>Recent GPS Records</h5>
+          <div class="d-flex align-items-center mb-2">
+            <div class="btn-group me-2" role="group">
+              <button id="play-route" class="btn btn-sm btn-primary">Play</button>
+              <button id="pause-route" class="btn btn-sm btn-secondary">Pause</button>
+              <button id="stop-route" class="btn btn-sm btn-danger">Stop</button>
+            </div>
+            <label class="me-2 mb-0">Speed</label>
+            <select id="playback-speed" class="form-select form-select-sm" style="width:100px;">
+              <option value="1000">1x</option>
+              <option value="500">2x</option>
+              <option value="250">4x</option>
+            </select>
+          </div>
+          <table class="table table-sm table-striped mt-2" id="gps-table">
+            <thead>
+              <tr><th>Lat</th><th>Lng</th><th>Time</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
-  <style>
-    #map {
-      height: 80vh;
-      margin-bottom: 20px;
-    }
-    .alert {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 9999;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1 class="text-center mt-3">Geofence Tracker</h1>
-    <div id="map"></div>
-    <table class="table table-striped mt-3" id="gps-table">
-      <thead>
-        <tr>
-          <th>Latitude</th>
-          <th>Longitude</th>
-          <th>Timestamp</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-  <div id="notification" style="display:none; position:fixed; bottom:10px; right:10px; background:red; color:white; padding:10px; border-radius:5px; z-index:1000;">
-  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

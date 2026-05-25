@@ -1,4 +1,29 @@
-# Smart Walking Stick for the Visually Impaired
+# Geofence IoT Blind Stick
+
+Project repository for the Geofence IoT blind-stick proof-of-concept. Contains a Node.js backend, a web dashboard, and ESP8266 firmware examples for live GPS/telemetry, alerts, and command delivery (vibration/voice).
+
+Contents (top-level)
+- `FINAL-CODE/AWS/` — Backend server, public dashboard, tests, Dockerfile
+- `NODEMCU/firmware_examples/` — ESP8266 firmware examples and wiring notes
+- `FINAL-CODE/AWS/public/` — Web dashboard and admin UI
+
+See `FINAL-CODE/AWS/README-QUICKSTART.md` for a step-by-step quickstart and wiring guide suitable for non-coders.
+
+To publish this repository to GitHub, follow the steps below (run locally):
+
+1. Initialize (if not already a git repo):
+```bash
+git init
+git add .
+git commit -m "Initial import"
+git branch -M main
+git remote add origin https://github.com/sudeepshm/blindStick.git
+git push -u origin main
+```
+
+If you use a personal access token, follow GitHub instructions for auth (or use `gh auth login`).
+
+License: add a `LICENSE` file if needed.# Smart Walking Stick for the Visually Impaired
 
 ## Project Overview
 The **Smart Walking Stick** is designed to assist visually impaired individuals during mobility training in schools for the blind. It features a geo-fencing capability accessible through a web app, obstacle detection with an IR sensor and buzzer, and real-time GPS tracking for monitoring and safety. The system aims to enhance independence and safety during training.
