@@ -11,8 +11,28 @@
   <div class="container">
     <h3>Commands - Admin</h3>
     <div class="mb-3">
-      <label class="form-label">API Key (for cancel/resend)</label>
+      <label class="form-label">API Key (for send/cancel/resend)</label>
       <input id="api-key" class="form-control" placeholder="Paste API key (stored in session)" />
+    </div>
+    <div class="row g-2 align-items-end mb-3">
+      <div class="col-md-3">
+        <label class="form-label">Device ID</label>
+        <input id="send-device" class="form-control" placeholder="node-1" />
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Command</label>
+        <select id="send-command" class="form-select">
+          <option value="vibrate">vibrate</option>
+          <option value="say">say</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Params JSON</label>
+        <input id="send-params" class="form-control" placeholder='{"text":"Slow down"}' />
+      </div>
+      <div class="col-md-2">
+        <button id="send-btn" class="btn btn-success w-100">Send</button>
+      </div>
     </div>
     <div class="row mb-3">
       <div class="col-md-4"><input id="filter-device" class="form-control" placeholder="Filter deviceId" /></div>

@@ -5,11 +5,14 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const turf = require('@turf/turf');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
+
+loadEnvFile(path.join(__dirname, '.env'));
 
 // Middleware
 app.use(cors());
@@ -19,6 +22,20 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Config
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/geofence-db';
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+
+    const [key, ...valueParts] = trimmed.split('=');
+    if (!key || process.env[key]) continue;
+    process.env[key] = valueParts.join('=').replace(/^["']|["']$/g, '');
+  }
+}
 
 // Connect to MongoDB
 mongoose.connect(MONGO_URI).catch(err => console.error('MongoDB connect error', err));
@@ -67,6 +84,7 @@ const commandSchema = new mongoose.Schema({
   deviceId: { type: String, required: true },
   command: { type: String, required: true },
   params: { type: Object },
+  result: { type: mongoose.Schema.Types.Mixed },
   status: { type: String, enum: ['pending','delivered','done','cancelled'], default: 'pending' },
   createdAt: { type: Date, default: Date.now },
   attempts: { type: Number, default: 0 }
@@ -143,7 +161,20 @@ app.post('/update-coords', async (req, res) => {
       await Device.findOneAndUpdate({ deviceId }, { $set: { 'meta.insideGeofence': true } });
     }
 
-    const payload = { id: deviceId, deviceId, lat, lng, battery, sos: !!sos, fall: !!fall, geofenceInside: insideAny, timestamp: new Date() };
+    const payload = {
+      id: deviceId,
+      deviceId,
+      lat,
+      lng,
+      battery,
+      sos: !!sos,
+      fall: !!fall,
+      distance,
+      puddle,
+      accel,
+      geofenceInside: insideAny,
+      timestamp: new Date()
+    };
     io.emit('locationUpdate', payload);
     res.sendStatus(200);
   } catch (err) { console.error('update-coords error', err); res.status(500).json({ message: 'Server error' }); }
@@ -218,10 +249,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('Socket disconnected', socket.id));
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-
 // Device acknowledges a command by id (marks done)
 app.post('/api/devices/:deviceId/commands/:cmdId/ack', async (req, res) => {
   try {
@@ -242,7 +269,7 @@ app.get('/api/commands', async (req, res) => {
     const q = {};
     if (req.query.deviceId) q.deviceId = req.query.deviceId;
     const results = await Command.find(q).sort({ createdAt: -1 }).limit(200);
-    res.json(results.map(r => ({ id: r._id, deviceId: r.deviceId, command: r.command, params: r.params, status: r.status, createdAt: r.createdAt, attempts: r.attempts })));
+    res.json(results.map(r => ({ id: r._id, deviceId: r.deviceId, command: r.command, params: r.params, status: r.status, createdAt: r.createdAt, attempts: r.attempts, result: r.result })));
   } catch (e) { console.error(e); res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -275,4 +302,8 @@ app.post('/api/commands/:cmdId/resend', requireApiKey, async (req, res) => {
     io.emit('commandUpdated', { id: cmd._id, status: cmd.status });
     res.json({ message: 'Resent', id: cmd._id });
   } catch (e) { console.error(e); res.status(500).json({ message: 'Server error' }); }
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
