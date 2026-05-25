@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test:e2e": "node tests/e2e-commands.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",
