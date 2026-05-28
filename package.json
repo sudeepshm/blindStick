@@ -1,0 +1,12 @@
+{
+  "name": "geofence-iot-blind-stick",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix FINAL-CODE/AWS ci --omit=dev",
+    "start": "npm --prefix FINAL-CODE/AWS start"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

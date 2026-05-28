@@ -43,6 +43,11 @@ node server.js
 
 Open `http://localhost:3000` in a browser to view the dashboard.
 
+Deployment note:
+- If your hosting platform deploys from the repository root, use build command `npm install` and start command `npm start`.
+- If you do not have MongoDB configured on the host, add environment variable `USE_MOCK_DATA=true` for a demo deployment.
+- If you do have MongoDB, set `MONGO_URI` to your Atlas or server connection string and keep `USE_MOCK_DATA=false`.
+
 ## 2. Flash firmware to NodeMCU
 
 - Open `NODEMCU/firmware_examples/esp_telemetry.ino` in Arduino IDE.
