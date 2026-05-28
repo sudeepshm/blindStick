@@ -22,6 +22,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Config
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/geofence-db';
+const USE_MOCK_DATA = process.env.USE_MOCK_DATA === 'true';
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -37,10 +38,14 @@ function loadEnvFile(filePath) {
   }
 }
 
-// Connect to MongoDB
-mongoose.connect(MONGO_URI).catch(err => console.error('MongoDB connect error', err));
-mongoose.connection.on('error', (err) => console.error('MongoDB connection error:', err));
-mongoose.connection.once('open', () => console.log('Connected to MongoDB'));
+// Connect to MongoDB unless local mock data mode is enabled.
+if (USE_MOCK_DATA) {
+  console.log('Using in-memory mock data. MongoDB connection skipped.');
+} else {
+  mongoose.connect(MONGO_URI).catch(err => console.error('MongoDB connect error', err));
+  mongoose.connection.on('error', (err) => console.error('MongoDB connection error:', err));
+  mongoose.connection.once('open', () => console.log('Connected to MongoDB'));
+}
 
 // Schemas
 const deviceSchema = new mongoose.Schema({
@@ -91,11 +96,95 @@ const commandSchema = new mongoose.Schema({
 });
 const Command = mongoose.model('Command', commandSchema);
 
+function buildMockData() {
+  const now = Date.now();
+  const route = [
+    [25.13090, 55.41880, 94, 64, false],
+    [25.13115, 55.41920, 92, 48, false],
+    [25.13138, 55.41972, 89, 24, false],
+    [25.13162, 55.42018, 87, 36, false],
+    [25.13186, 55.42072, 84, 72, true],
+    [25.13205, 55.42114, 82, 55, false],
+    [25.13226, 55.42160, 79, 42, false],
+    [25.13252, 55.42210, 76, 68, false],
+  ];
+
+  const history = route.map(([lat, lng, battery, distance, puddle], index) => ({
+    _id: `gps-${index + 1}`,
+    deviceId: 'stick-demo-01',
+    lat,
+    lng,
+    battery,
+    distance,
+    puddle,
+    accel: { x: 0.02 + index / 100, y: 0.01, z: 0.98 },
+    createdAt: new Date(now - (route.length - index) * 60000),
+  }));
+
+  const latest = history[history.length - 1];
+  return {
+    geofences: [{
+      _id: 'geofence-campus-yard',
+      name: 'Campus training yard',
+      geojson: {
+        type: 'Feature',
+        properties: { name: 'Campus training yard' },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [55.41840, 25.13060],
+            [55.42200, 25.13060],
+            [55.42200, 25.13220],
+            [55.41840, 25.13220],
+            [55.41840, 25.13060],
+          ]],
+        },
+      },
+      createdAt: new Date(now - 90 * 60000),
+    }],
+    devices: [{
+      _id: 'device-stick-demo-01',
+      deviceId: 'stick-demo-01',
+      lastSeen: latest.createdAt,
+      battery: latest.battery,
+      location: { lat: latest.lat, lng: latest.lng },
+      meta: { insideGeofence: false },
+    }],
+    gps: history,
+    alerts: [
+      { _id: 'alert-1', deviceId: 'stick-demo-01', type: 'OBSTACLE', payload: { distance: 24 }, createdAt: history[2].createdAt },
+      { _id: 'alert-2', deviceId: 'stick-demo-01', type: 'PUDDLE', payload: { lat: history[4].lat, lng: history[4].lng }, createdAt: history[4].createdAt },
+      { _id: 'alert-3', deviceId: 'stick-demo-01', type: 'GEOFENCE_EXIT', payload: { lat: latest.lat, lng: latest.lng }, createdAt: latest.createdAt },
+    ],
+    commands: [{
+      _id: 'cmd-1',
+      deviceId: 'stick-demo-01',
+      command: 'vibrate',
+      params: { pattern: 'short-short-long' },
+      status: 'pending',
+      createdAt: new Date(now - 10 * 60000),
+      attempts: 0,
+    }],
+  };
+}
+
+const mockData = buildMockData();
+
+function nextMockId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
 // POST: Save geofence
 app.post('/api/geofence', async (req, res) => {
   try {
     const { name, geojson } = req.body;
     if (!geojson) return res.status(400).json({ message: 'Invalid geofence data.' });
+    if (USE_MOCK_DATA) {
+      const g = { _id: nextMockId('geofence'), name: name || 'Mock geofence', geojson, createdAt: new Date() };
+      mockData.geofences.unshift(g);
+      io.emit('geofenceUpdated', g.geojson);
+      return res.status(200).json({ message: 'Geofence saved successfully.' });
+    }
     const g = new Geofence({ name, geojson });
     await g.save();
     io.emit('geofenceUpdated', g.geojson);
@@ -105,7 +194,10 @@ app.post('/api/geofence', async (req, res) => {
 
 // GET: list geofences
 app.get('/api/geofence', async (req, res) => {
-  try { const geofences = await Geofence.find().sort({ createdAt: -1 }); res.json(geofences); }
+  try {
+    if (USE_MOCK_DATA) return res.json(mockData.geofences);
+    const geofences = await Geofence.find().sort({ createdAt: -1 }); res.json(geofences);
+  }
   catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -114,6 +206,33 @@ app.post('/update-coords', async (req, res) => {
   try {
     const { deviceId, lat, lng, battery, sos, fall, distance, puddle, accel } = req.body;
     if (typeof lat !== 'number' || typeof lng !== 'number' || !deviceId) return res.status(400).json({ message: 'Invalid payload' });
+
+    if (USE_MOCK_DATA) {
+      const point = turf.point([lng, lat]);
+      const insideAny = mockData.geofences.some((g) => turf.booleanPointInPolygon(point, g.geojson));
+      const gps = { _id: nextMockId('gps'), deviceId, lat, lng, battery, distance, puddle, accel, createdAt: new Date() };
+      mockData.gps.unshift(gps);
+
+      const existingDevice = mockData.devices.find((d) => d.deviceId === deviceId);
+      if (existingDevice) {
+        existingDevice.lastSeen = gps.createdAt;
+        existingDevice.battery = battery;
+        existingDevice.location = { lat, lng };
+        existingDevice.meta = { ...(existingDevice.meta || {}), insideGeofence: insideAny };
+      } else {
+        mockData.devices.unshift({ _id: nextMockId('device'), deviceId, lastSeen: gps.createdAt, battery, location: { lat, lng }, meta: { insideGeofence: insideAny } });
+      }
+
+      if (sos) mockData.alerts.unshift({ _id: nextMockId('alert'), deviceId, type: 'SOS', payload: { lat, lng, battery }, createdAt: gps.createdAt });
+      if (fall) mockData.alerts.unshift({ _id: nextMockId('alert'), deviceId, type: 'FALL', payload: { lat, lng, battery }, createdAt: gps.createdAt });
+      if (typeof distance === 'number' && distance > 0 && distance < 30) mockData.alerts.unshift({ _id: nextMockId('alert'), deviceId, type: 'OBSTACLE', payload: { lat, lng, battery, distance }, createdAt: gps.createdAt });
+      if (puddle) mockData.alerts.unshift({ _id: nextMockId('alert'), deviceId, type: 'PUDDLE', payload: { lat, lng, battery }, createdAt: gps.createdAt });
+      if (!insideAny) mockData.alerts.unshift({ _id: nextMockId('alert'), deviceId, type: 'GEOFENCE_EXIT', payload: { lat, lng, battery }, createdAt: gps.createdAt });
+
+      const payload = { id: deviceId, deviceId, lat, lng, battery, sos: !!sos, fall: !!fall, distance, puddle, accel, geofenceInside: insideAny, timestamp: gps.createdAt };
+      io.emit('locationUpdate', payload);
+      return res.sendStatus(200);
+    }
 
     // Save GPS record (include sensor fields)
     const gps = new GPS({ deviceId, lat, lng, battery, distance, puddle, accel });
@@ -182,7 +301,10 @@ app.post('/update-coords', async (req, res) => {
 
 // GET: devices
 app.get('/api/devices', async (req, res) => {
-  try { const devices = await Device.find().sort({ lastSeen: -1 }); res.json(devices); }
+  try {
+    if (USE_MOCK_DATA) return res.json(mockData.devices.sort((a, b) => b.lastSeen - a.lastSeen));
+    const devices = await Device.find().sort({ lastSeen: -1 }); res.json(devices);
+  }
   catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -191,6 +313,9 @@ app.get('/api/history/:deviceId', async (req, res) => {
   try {
     const { deviceId } = req.params;
     const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+    if (USE_MOCK_DATA) {
+      return res.json(mockData.gps.filter((row) => row.deviceId === deviceId).sort((a, b) => b.createdAt - a.createdAt).slice(0, limit));
+    }
     const rows = await GPS.find({ deviceId }).sort({ createdAt: -1 }).limit(limit);
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
@@ -198,7 +323,10 @@ app.get('/api/history/:deviceId', async (req, res) => {
 
 // GET: recent alerts
 app.get('/api/alerts', async (req, res) => {
-  try { const alerts = await Alert.find().sort({ createdAt: -1 }).limit(200); res.json(alerts); }
+  try {
+    if (USE_MOCK_DATA) return res.json(mockData.alerts.sort((a, b) => b.createdAt - a.createdAt).slice(0, 200));
+    const alerts = await Alert.find().sort({ createdAt: -1 }).limit(200); res.json(alerts);
+  }
   catch (err) { console.error(err); res.status(500).json({ message: 'Server error' }); }
 });
 
@@ -218,6 +346,12 @@ app.post('/api/devices/:deviceId/command', requireApiKey, async (req, res) => {
     const { command, params } = req.body;
     if (!command) return res.status(400).json({ message: 'Missing command' });
     const payload = { deviceId, command, params: params || {}, issuedAt: new Date() };
+    if (USE_MOCK_DATA) {
+      const cmd = { _id: nextMockId('cmd'), deviceId, command, params: params || {}, status: 'pending', createdAt: payload.issuedAt, attempts: 0 };
+      mockData.commands.unshift(cmd);
+      io.emit('deviceCommand', payload);
+      return res.json({ message: 'Command emitted and queued', payload });
+    }
     // save to DB for devices that poll
     const cmd = new Command({ deviceId, command, params: params || {} });
     await cmd.save();
@@ -231,6 +365,11 @@ app.post('/api/devices/:deviceId/command', requireApiKey, async (req, res) => {
 app.get('/api/devices/:deviceId/commands', async (req, res) => {
   try {
     const { deviceId } = req.params;
+    if (USE_MOCK_DATA) {
+      const cmds = mockData.commands.filter((cmd) => cmd.deviceId === deviceId && cmd.status === 'pending').sort((a, b) => a.createdAt - b.createdAt).slice(0, 50);
+      cmds.forEach((cmd) => { cmd.status = 'delivered'; });
+      return res.json(cmds.map((c) => ({ id: c._id, command: c.command, params: c.params, createdAt: c.createdAt })));
+    }
     const cmds = await Command.find({ deviceId, status: 'pending' }).sort({ createdAt: 1 }).limit(50);
     if (cmds.length) {
       const ids = cmds.map(c => c._id);
@@ -255,6 +394,13 @@ app.post('/api/devices/:deviceId/commands/:cmdId/ack', async (req, res) => {
     const { deviceId, cmdId } = req.params;
     const update = { status: 'done' };
     if (req.body && req.body.result) update.result = req.body.result;
+    if (USE_MOCK_DATA) {
+      const cmd = mockData.commands.find((c) => c._id === cmdId && c.deviceId === deviceId);
+      if (!cmd) return res.status(404).json({ message: 'Command not found' });
+      Object.assign(cmd, update);
+      io.emit('commandAck', { deviceId, id: cmd._id, status: cmd.status, result: cmd.result });
+      return res.json({ message: 'ACK recorded', id: cmd._id, status: cmd.status });
+    }
     const cmd = await Command.findOneAndUpdate({ _id: cmdId, deviceId }, { $set: update }, { new: true });
     if (!cmd) return res.status(404).json({ message: 'Command not found' });
     // emit an event for monitoring UI
@@ -268,6 +414,13 @@ app.get('/api/commands', async (req, res) => {
   try {
     const q = {};
     if (req.query.deviceId) q.deviceId = req.query.deviceId;
+    if (USE_MOCK_DATA) {
+      const results = mockData.commands
+        .filter((cmd) => !q.deviceId || cmd.deviceId === q.deviceId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 200);
+      return res.json(results.map((r) => ({ id: r._id, deviceId: r.deviceId, command: r.command, params: r.params, status: r.status, createdAt: r.createdAt, attempts: r.attempts, result: r.result })));
+    }
     const results = await Command.find(q).sort({ createdAt: -1 }).limit(200);
     res.json(results.map(r => ({ id: r._id, deviceId: r.deviceId, command: r.command, params: r.params, status: r.status, createdAt: r.createdAt, attempts: r.attempts, result: r.result })));
   } catch (e) { console.error(e); res.status(500).json({ message: 'Server error' }); }
@@ -280,6 +433,13 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 app.delete('/api/commands/:cmdId', requireApiKey, async (req, res) => {
   try {
     const { cmdId } = req.params;
+    if (USE_MOCK_DATA) {
+      const cmd = mockData.commands.find((c) => c._id === cmdId);
+      if (!cmd) return res.status(404).json({ message: 'Command not found' });
+      cmd.status = 'cancelled';
+      io.emit('commandUpdated', { id: cmd._id, status: cmd.status });
+      return res.json({ message: 'Cancelled', id: cmd._id });
+    }
     const cmd = await Command.findByIdAndUpdate(cmdId, { $set: { status: 'cancelled' } }, { new: true });
     if (!cmd) return res.status(404).json({ message: 'Command not found' });
     io.emit('commandUpdated', { id: cmd._id, status: cmd.status });
@@ -291,6 +451,16 @@ app.delete('/api/commands/:cmdId', requireApiKey, async (req, res) => {
 app.post('/api/commands/:cmdId/resend', requireApiKey, async (req, res) => {
   try {
     const { cmdId } = req.params;
+    if (USE_MOCK_DATA) {
+      const cmd = mockData.commands.find((c) => c._id === cmdId);
+      if (!cmd) return res.status(404).json({ message: 'Command not found' });
+      cmd.status = 'pending';
+      cmd.attempts = (cmd.attempts || 0) + 1;
+      cmd.createdAt = new Date();
+      io.emit('deviceCommand', { deviceId: cmd.deviceId, command: cmd.command, params: cmd.params, issuedAt: cmd.createdAt });
+      io.emit('commandUpdated', { id: cmd._id, status: cmd.status });
+      return res.json({ message: 'Resent', id: cmd._id });
+    }
     const cmd = await Command.findById(cmdId);
     if (!cmd) return res.status(404).json({ message: 'Command not found' });
     cmd.status = 'pending';

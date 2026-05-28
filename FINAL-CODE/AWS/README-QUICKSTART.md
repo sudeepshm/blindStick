@@ -28,7 +28,10 @@ Copy `.env.example` to `.env` and edit the values:
 PORT=3000
 MONGO_URI=mongodb://localhost:27017/geofence-db
 API_KEY=pick_a_strong_key
+USE_MOCK_DATA=false
 ```
+
+For a local dashboard demo without MongoDB, set `USE_MOCK_DATA=true`. The server will use in-memory sample devices, GPS history, geofences, alerts, and commands.
 
 Install and run the server:
 
